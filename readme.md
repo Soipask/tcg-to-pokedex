@@ -24,3 +24,7 @@ The only trouble (as far as I know) I had with Nidoran♂ and Nidoran♀. They w
 Python (I ran it on 3.9.13, but there really shouldn't be anything preventing it from running it in the older versions).
 Other requirements are in [requirements.txt](requirements.txt) file. Just run `pip install -r requirements.txt` inside the folder.
 
+### Known issues
+Urshifu from Chilling Reign
+Dolliv
+Flabébé (unprintable char 'é' from web)
