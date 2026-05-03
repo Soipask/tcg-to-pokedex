@@ -5,6 +5,8 @@ import string
 import re
 import time
 
+# TODO: Delete. Here only for quick references to past and half-working code
+
 ''' Try to find pokemon name in pokedex '''
 def try_find_in_pokedex(full_name : str):
     # Special conditions
@@ -13,9 +15,6 @@ def try_find_in_pokedex(full_name : str):
 
     if "nidoran" in full_name.lower():
         return ("(29f, 32m)","","")
-    
-    if "doll" in full_name.lower():
-        return(None, "", "")
 
     # Try to get full name
     dex_num = pokedex.get(full_name.lower())
