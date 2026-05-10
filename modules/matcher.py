@@ -1,5 +1,60 @@
 from modules.models import CardInfo
 
+import re
+
+NIDORAN = "nidoran"
+
+NORMALIZATION_REPLACEMENTS = {
+    "é": "e",
+    "'": "",
+    ".": "",
+    "-": " ",
+    "&": " ",
+    ",": " ",
+}
+
+# Characters that would after normalization potentially create new tokens
+NEW_TOKEN_REPLACEMENTS = {
+    "-": " ",
+    "&": " ",
+    ",": " ",
+}
+
+def normalize(text: str) -> str:
+    ''' Normalizes name for better matching. Returns normalized string. '''
+    text = text.lower()
+
+    # replacing special chars
+    for old, new in NORMALIZATION_REPLACEMENTS.items():
+        text = text.replace(old, new)
+
+    # collapse whitespaces
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip()
+
+    # and some special matching
+    text = apply_special_matching_conditions(text)
+
+    return text
+
+def tokenize(text: str):
+    ''' Splits string into tokens '''
+    return normalize(text).split()
+
+def tokenize_original(text : str):
+    # replacing special chars
+    for old, new in NEW_TOKEN_REPLACEMENTS.items():
+        text = text.replace(old, new)
+
+    return text.split()
+
+def apply_special_matching_conditions(name : str):
+    ''' Applies some special conditions before matching. Returns new string to match.'''
+    if "porygon 2" in name.lower():
+        name = name.replace("porygon 2", "porygon2")
+    
+    return name
+
 class Matcher:
 
     def __init__(self):
@@ -11,67 +66,24 @@ class Matcher:
         
         for pokeline in pokedex_csv:
             pokeline_parsed = pokeline.strip().split(",")
-            self.pokedex[pokeline_parsed[1].lower()] = pokeline_parsed[0]
+            self.pokedex[normalize(pokeline_parsed[1].lower())] = pokeline_parsed[0]
 
-    def apply_special_matching_conditions(self, card : CardInfo):
-        # Special conditions
-        if "porygon 2" in card.full_name.lower():
-            card.full_name = card.full_name.replace("Porygon 2", "Porygon2")
-        # TODO: Match "Porygon 2"/"Flabebe" to "Porygon2"/"Flabébé" without changing card's full_name
-        # e.g.: 7622;Flabebe - XY Flashfire #62
-
-    def try_match_beginning(self, card : CardInfo, name_split : list[str]):
-        # At first, try to just cut the last part and set it as suffix
-        dex_num = self.pokedex.get(" ".join(name_split[:-1]).lower())
-        if dex_num is not None:
-            card.pokemon = dex_num
-            card.prefix = ""
-            card.suffix = name_split[-1]
-            return
-        card.pokemon = None
-            
-    def try_match_end(self, card : CardInfo, name_split : list[str]):
-        dex_num = self.pokedex.get(" ".join(name_split[1:]).lower())
-        if dex_num is not None:
-            card.pokemon = dex_num
-            card.prefix = name_split[0]
-            card.suffix = ""
-            return
-        
-    def try_match_every_combination(self, card : CardInfo, name_split : list[str]):
-        dex_num = self.pokedex.get(" ".join(name_split[1:-1]).lower())
-        if dex_num is not None:
-            card.pokemon = dex_num
-            card.prefix = name_split[0]
-            card.suffix = name_split[-1]
-            return
-        
-        # And now just try every individual combination
-        for i in range(len(name_split)):
-            for j in range(i + 1, len(name_split)):
-                dex_num = self.pokedex.get(" ".join(name_split[i:j]).lower())
-                if dex_num is not None:
-                    card.pokemon = dex_num
-                    card.prefix = " ".join(name_split[:i])
-                    card.suffix = " ".join(name_split[j:])
-                    return
-                
-        card.pokemon = 0
-        card.prefix = ""
-        card.suffix = ""
+    def find_pokemon(self, text: str):
+        normalized = normalize(text)
+        return self.pokedex.get(normalized)
 
     def try_match_nidoran(self, card: CardInfo):
         full_name_lower = card.full_name.lower()
 
-        if "nidoran" not in full_name_lower:
+        if NIDORAN not in full_name_lower:
             return False
 
-        nidoran_pos = full_name_lower.find("nidoran")
+        nidoran_pos = full_name_lower.find(NIDORAN)
 
         # Everything before Nidoran
         card.prefix = card.full_name[:nidoran_pos].strip()
 
-        after = card.full_name[nidoran_pos + len("nidoran"):]
+        after = card.full_name[nidoran_pos + len(NIDORAN):]
 
         # Remove spaces/opening brackets before gender
         after = after.lstrip(" ([{")
@@ -103,33 +115,67 @@ class Matcher:
 
         return True
 
-    def try_match(self, card : CardInfo):
-        # Try to get full name
-        card.pokemon = self.pokedex.get(card.full_name.lower())
+    def try_match(self, card: CardInfo):
+        if self.try_match_nidoran(card):
+            return True
+        
+        tokens = tokenize(card.full_name)
+        original_tokens = tokenize_original(card.full_name)
 
-        self.try_match_nidoran(card)
+        matches = []
+        start = 0
+        while start < len(tokens):
 
-        if card.pokemon is None and " " in card.full_name and "&" not in card.full_name:
-            name_split = card.full_name.split()
+            found_match = False
 
-            # At first, try to just cut the last part and set it as suffix
-            self.try_match_beginning(card, name_split)
+            # Try longer combinations first
+            for end in range(len(tokens), start, -1):
+                candidate = " ".join(tokens[start:end])
+                dex_num = self.find_pokemon(candidate)
 
-            if card.pokemon is None or card.pokemon == 0:
-                # Then try to cut the prefix only
-                self.try_match_end(card, name_split)
-            
-            # Then both
-            if card.pokemon is None or card.pokemon == 0:
-                self.try_match_every_combination(card, name_split)
-        else:
-            if card.pokemon is None:
-                card.pokemon = 0
+                if dex_num is not None:
+                    matches.append({
+                        "pokemon": candidate,
+                        "dex": dex_num,
+                        "start": start,
+                        "end": end
+                    })
+
+                    start = end
+                    found_match = True
+                    break
+
+            # Nothing matched at this position
+            if not found_match:
+                start += 1
+
+        if len(matches) == 0:
+            return False
+
+        # Pokemon numbers
+        card.pokemon = "/".join(
+            str(match["dex"])
+            for match in matches
+        )
+
+        # Prefix
+        first_match = matches[0]
+
+        card.prefix = " ".join(
+            original_tokens[:first_match["start"]]
+        ).strip()
+
+        # Suffix
+        last_match = matches[-1]
+
+        card.suffix = " ".join(
+            original_tokens[last_match["end"]:]
+        ).strip()
+
+        return True
+
+    def match(self, card: CardInfo):
+        if not self.try_match(card):
+            card.pokemon = 0
             card.prefix = ""
             card.suffix = ""
-
-    ''' Try to find pokemon name in pokedex '''
-    def try_find(self, card : CardInfo):
-        self.apply_special_matching_conditions(card)
-
-        self.try_match(card)

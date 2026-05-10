@@ -48,6 +48,7 @@ class CardScraper:
         id = 0
         cards = []
         for set in sets:
+            # TODO: Driver/connection timed out - try reconnect
             self.driver.get(set.url)
             card_listings = self.driver.find_element(By.CLASS_NAME, "cardlisting")
             card_names = card_listings.find_elements(By.CSS_SELECTOR, "div.card")
