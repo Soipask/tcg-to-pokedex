@@ -2,6 +2,12 @@ from modules.models import CardInfo
 
 from pathlib import Path
 
+BRACKETS = {
+    "(": ")",
+    "[": "]",
+    "{": "}",
+}
+
 allowed_special = set()
 translations = {}
 
@@ -75,19 +81,49 @@ def to_print(text: str):
 
     return "".join(result)
 
+def split_outside_brackets(text: str) -> tuple[str, str]:
+
+    stack = []
+
+    for i in range(len(text) - 2):
+
+        char = text[i]
+
+        # Opening bracket
+        if char in BRACKETS:
+            stack.append(BRACKETS[char])
+
+        # Closing bracket
+        elif len(stack) > 0 and char == stack[-1]:
+            stack.pop()
+
+        # Separator outside brackets
+        elif (
+            len(stack) == 0
+            and text[i:i+3] == " - "
+        ):
+            return (
+                text[:i],
+                text[i+3:]
+            )
+
+    return (text, "")
+
 def parse_name(card : CardInfo):
     card.card_title = to_print(card.card_title)
     card_title = card.card_title.replace("&amp;", "&")
-    card_title_parsed = card_title.split(" - ")
+
+    card_title_parsed, card_title_suffix = split_outside_brackets(card_title)
+
     # TODO: Smart parsing? for e.g. 7507;Gym Badge (Brock - Boulder) - XY Promos #203;Gym Badge (Brock;... (ignore " - " inside brackets?)
-    last_name_split = card_title_parsed[-1].split("#")
+    last_name_split = card_title_suffix.split("#")
     
     if len(last_name_split) >= 2:
         num = last_name_split[-1]
     else:
         num = ""
 
-    full_name = to_print(card_title_parsed[0].strip())
+    full_name = to_print(card_title_parsed.strip())
 
     card.card_number = num
     card.full_name = full_name
