@@ -1,6 +1,7 @@
 from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+import time
 
 from modules.models import CardInfo, SetInfo
 
@@ -48,10 +49,30 @@ class CardScraper:
         id = 0
         cards = []
         for set in sets:
-            # TODO: Driver/connection timed out - try reconnect
-            self.driver.get(set.url)
-            card_listings = self.driver.find_element(By.CLASS_NAME, "cardlisting")
-            card_names = card_listings.find_elements(By.CSS_SELECTOR, "div.card")
+            last_exception = None
+
+            for attempt in range(5):
+
+                try:
+                    self.driver.get(set.url)
+
+                    card_listings = self.driver.find_element(By.CLASS_NAME, "cardlisting")
+                    card_names = card_listings.find_elements(By.CSS_SELECTOR, "div.card")
+
+                    break
+
+                except Exception as e:
+                    last_exception = e
+
+                    print(f"[{attempt + 1}/5] Failed loading {set.url}")
+                    print(e)
+
+                    time.sleep(2)
+
+            else:
+                raise RuntimeError(
+                    f"Failed loading set after 5 attempts: {set.url}"
+                ) from last_exception
 
             for card in card_names:
                 card_title = card.find_element(By.TAG_NAME, "a").get_attribute("title")
