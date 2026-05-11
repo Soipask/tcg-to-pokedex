@@ -1,6 +1,20 @@
 from modules.models import CardInfo
 
-import re
+from dataclasses import dataclass
+
+@dataclass
+class Token:
+    text: str
+    normalized: str
+    start: int
+    end: int
+
+@dataclass
+class Match:
+    pokemon: str
+    dex: str
+    start: int
+    end: int
 
 NIDORAN = "nidoran"
 
@@ -14,10 +28,13 @@ NORMALIZATION_REPLACEMENTS = {
 }
 
 # Characters that would after normalization potentially create new tokens
-NEW_TOKEN_REPLACEMENTS = {
-    "-": " ",
-    "&": " ",
-    ",": " ",
+SEPARATORS = {
+    " ",
+    "\t",
+    "\n",
+    "-",
+    ",",
+    "&"
 }
 
 def normalize(text: str) -> str:
@@ -28,32 +45,57 @@ def normalize(text: str) -> str:
     for old, new in NORMALIZATION_REPLACEMENTS.items():
         text = text.replace(old, new)
 
-    # collapse whitespaces
-    text = re.sub(r"\s+", " ", text)
     text = text.strip()
-
-    # and some special matching
-    text = apply_special_matching_conditions(text)
 
     return text
 
-def tokenize(text: str):
-    ''' Splits string into tokens '''
-    return normalize(text).split()
-
-def tokenize_original(text : str):
-    # replacing special chars
-    for old, new in NEW_TOKEN_REPLACEMENTS.items():
-        text = text.replace(old, new)
-
-    return text.split()
-
 def apply_special_matching_conditions(name : str):
     ''' Applies some special conditions before matching. Returns new string to match.'''
-    if "porygon 2" in name.lower():
-        name = name.replace("porygon 2", "porygon2")
+    if "Porygon 2" in name:
+        name = name.replace("Porygon 2", "Porygon2")
     
     return name
+
+def tokenize(text: str) -> list[Token]:
+    # and some special matching
+    text = apply_special_matching_conditions(text)
+    
+    tokens = []
+
+    token_start = None
+
+    for i, char in enumerate(text):
+
+        if char in SEPARATORS:
+
+            if token_start is not None:
+                token_text = text[token_start:i]
+
+                tokens.append(Token(
+                    text=token_text,
+                    normalized=normalize(token_text),
+                    start=token_start,
+                    end=i
+                ))
+
+                token_start = None
+
+        else:
+            if token_start is None:
+                token_start = i
+
+    # Last token
+    if token_start is not None:
+        token_text = text[token_start:]
+
+        tokens.append(Token(
+            text=token_text,
+            normalized=normalize(token_text),
+            start=token_start,
+            end=len(text)
+        ))
+
+    return tokens
 
 class Matcher:
 
@@ -110,7 +152,9 @@ class Matcher:
                 return True
 
         # Unknown / ambiguous
-        card.pokemon = "(29f/32m)"
+        # card.pokemon = "(29f/32m)"
+        # There's only one ambiguous card on the site as of right now and that's male one
+        card.pokemon = "32"
         card.suffix = after.strip()
 
         return True
@@ -120,7 +164,6 @@ class Matcher:
             return True
         
         tokens = tokenize(card.full_name)
-        original_tokens = tokenize_original(card.full_name)
 
         matches = []
         start = 0
@@ -130,16 +173,19 @@ class Matcher:
 
             # Try longer combinations first
             for end in range(len(tokens), start, -1):
-                candidate = " ".join(tokens[start:end])
+                candidate = " ".join(
+                    token.normalized
+                    for token in tokens[start:end]
+                )
                 dex_num = self.find_pokemon(candidate)
 
                 if dex_num is not None:
-                    matches.append({
-                        "pokemon": candidate,
-                        "dex": dex_num,
-                        "start": start,
-                        "end": end
-                    })
+                    matches.append(Match(
+                        candidate, 
+                        dex_num, 
+                        tokens[start].start, 
+                        tokens[end - 1].end)
+                    )
 
                     start = end
                     found_match = True
@@ -153,24 +199,15 @@ class Matcher:
             return False
 
         # Pokemon numbers
-        card.pokemon = "/".join(
-            str(match["dex"])
-            for match in matches
-        )
+        card.pokemon = "/".join(match.dex for match in matches)
 
         # Prefix
         first_match = matches[0]
-
-        card.prefix = " ".join(
-            original_tokens[:first_match["start"]]
-        ).strip()
+        card.prefix = card.full_name[:first_match.start].strip()
 
         # Suffix
         last_match = matches[-1]
-
-        card.suffix = " ".join(
-            original_tokens[last_match["end"]:]
-        ).strip()
+        card.suffix = card.full_name[last_match.end:].strip()
 
         return True
 
